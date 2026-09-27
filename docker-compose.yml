@@ -1,0 +1,16 @@
+services:
+  command-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: triage-desk/command-service:latest
+    container_name: triage-command-service
+    restart: unless-stopped
+    environment:
+      - SERVER_PORT=8081
+      - SPRING_PROFILES_ACTIVE=prod
+
+networks:
+  default:
+    name: triage-net
+    external: true
