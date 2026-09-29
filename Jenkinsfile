@@ -46,7 +46,7 @@ EOF
                         withSonarQubeEnv('SonarQube') {
                             withEnv(["SONAR_USER_HOME=${env.WORKSPACE}/.sonar"]) {
                                 sh 'rm -rf "${SONAR_USER_HOME}/cache" || true'
-                                sh './mvnw org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=triage-desk-command-service -s settings.xml'
+                                sh './mvnw sonar:sonar -Dsonar.projectKey=triage-desk-command-service -s settings.xml'
                             }
                         }
 
