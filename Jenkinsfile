@@ -35,6 +35,12 @@ EOF
                     }
                 }
 
+                stage('Lint and Format') {
+                    steps {
+                        sh './mvnw spotless:check checkstyle:check -s settings.xml'
+                    }
+                }
+
                 stage('Unit & Integration Tests') {
                     steps {
                         sh './mvnw clean test -s settings.xml'

@@ -6,8 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 @SpringBootApplication
 public class CommandServiceApplication {
 
-	public static void main(String[] args) {
-		SpringApplication.run(CommandServiceApplication.class, args);
-	}
-
+    public static void main(String[] args) {
+        SpringApplication.run(CommandServiceApplication.class, args);
+    }
 }
