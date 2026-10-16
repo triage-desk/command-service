@@ -57,7 +57,7 @@ CREATE TABLE users
     first_name  TEXT          NOT NULL,
     last_name   TEXT          NOT NULL,
     role        user_role     NOT NULL,
-    created_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
 
     CONSTRAINT users_pkey PRIMARY KEY (id),
