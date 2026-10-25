@@ -9,6 +9,7 @@ import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -23,6 +24,7 @@ class CommandServiceApplicationTests {
     @MockitoBean private EntityManager entityManager;
     @MockitoBean private JwtDecoder jwtDecoder;
     @MockitoBean private StringRedisTemplate redisTemplate;
+    @MockitoBean private KafkaTemplate<String, String> kafkaTemplate;
 
     @Test
     void contextLoads() {}
