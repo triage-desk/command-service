@@ -1,12 +1,12 @@
 server:
-  port: ${SERVER_PORT:8080}
+  port: ${SERVER_PORT:8081}
   shutdown: graceful
 
 spring:
   config:
     import: optional:file:.env[.properties]
   application:
-    name: command-service
+    name: ${SERVICE_NAME:triage-command-service}
   threads:
     virtual:
       enabled: true
@@ -28,7 +28,7 @@ spring:
   jpa:
     open-in-view: false
     hibernate:
-      ddl-auto: validate
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:none}
     properties:
       hibernate:
         format_sql: false
