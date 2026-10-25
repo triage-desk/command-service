@@ -4,9 +4,11 @@ import dev.eyad_sharkawy.triage_desk.command_service.domain.entity.OutboxEventEn
 import dev.eyad_sharkawy.triage_desk.command_service.domain.enums.OutboxEventStatus;
 import dev.eyad_sharkawy.triage_desk.command_service.infrastructure.config.OutboxProperties;
 import dev.eyad_sharkawy.triage_desk.command_service.repository.OutboxEventRepository;
+import dev.eyad_sharkawy.triage_desk.common.context.TenantContext;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -41,7 +43,7 @@ public class OutboxEventPublisher {
             return;
         }
 
-        log.debug("Processing {} pending outbox event(s)", pendingEvents.size());
+        log.info("Processing {} pending outbox event(s)", pendingEvents.size());
 
         for (OutboxEventEntity event : pendingEvents) {
             publishSingleEvent(event);
@@ -49,6 +51,9 @@ public class OutboxEventPublisher {
     }
 
     private void publishSingleEvent(OutboxEventEntity event) {
+        UUID tenantId = event.getTenantId();
+        TenantContext.setTenantId(tenantId);
+
         String partitionKey = event.getAggregateId().toString();
 
         ProducerRecord<String, String> producerRecord =
@@ -59,9 +64,7 @@ public class OutboxEventPublisher {
                 .add("X-Source-Service", SERVICE_NAME.getBytes(StandardCharsets.UTF_8));
         producerRecord
                 .headers()
-                .add(
-                        "X-Tenant-ID",
-                        event.getTenantId().toString().getBytes(StandardCharsets.UTF_8));
+                .add("X-Tenant-ID", tenantId.toString().getBytes(StandardCharsets.UTF_8));
         producerRecord
                 .headers()
                 .add("X-Event-Type", event.getEventType().getBytes(StandardCharsets.UTF_8));
@@ -72,12 +75,20 @@ public class OutboxEventPublisher {
             event.setStatus(OutboxEventStatus.PUBLISHED);
             event.setProcessedAt(Instant.now());
             event.setErrorMessage(null);
-            log.debug("Outbox event {} published successfully to Kafka", event.getId());
+            log.info(
+                    "Outbox event {} (type: {}, aggregate: {}) published successfully to Kafka"
+                            + " topic '{}'",
+                    event.getId(),
+                    event.getEventType(),
+                    event.getAggregateId(),
+                    outboxProperties.topic());
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             handleEventExceptions(event, ex);
         } catch (ExecutionException | TimeoutException ex) {
             handleEventExceptions(event, ex);
+        } finally {
+            TenantContext.clear();
         }
     }
 

@@ -139,6 +139,13 @@ public class TicketCommandService {
                                             ? jwt.getClaimAsString("family_name")
                                             : "User";
 
+                            log.info(
+                                    "Auto-provisioning customer user '{}' (keycloakId: {}) for"
+                                            + " tenant {}",
+                                    email,
+                                    keycloakId,
+                                    tenantId);
+
                             return userRepository.save(
                                     UserEntity.builder()
                                             .tenantId(tenantId)
