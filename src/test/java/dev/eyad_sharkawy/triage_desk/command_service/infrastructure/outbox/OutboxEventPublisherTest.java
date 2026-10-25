@@ -7,6 +7,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import dev.eyad_sharkawy.triage_desk.command_service.application.event.OutboxEventReadyEvent;
 import dev.eyad_sharkawy.triage_desk.command_service.domain.entity.OutboxEventEntity;
 import dev.eyad_sharkawy.triage_desk.command_service.domain.enums.OutboxEventStatus;
 import dev.eyad_sharkawy.triage_desk.command_service.infrastructure.config.OutboxProperties;
@@ -14,6 +15,7 @@ import dev.eyad_sharkawy.triage_desk.command_service.repository.OutboxEventRepos
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -44,7 +46,7 @@ class OutboxEventPublisherTest {
 
     @BeforeEach
     void setUp() {
-        outboxProperties = new OutboxProperties("triage-desk.command.tickets", 50, 500, 5);
+        outboxProperties = new OutboxProperties("triage-desk.command.tickets", 50, 30000, 5);
         publisher =
                 new OutboxEventPublisher(outboxEventRepository, kafkaTemplate, outboxProperties);
     }
@@ -106,8 +108,8 @@ class OutboxEventPublisherTest {
     }
 
     @Test
-    @DisplayName("should do nothing when no pending outbox events exist")
-    void shouldDoNothingWhenNoPendingEvents() {
+    @DisplayName("should skip publishing when no pending events are returned")
+    void shouldSkipWhenNoPendingEvents() {
         when(outboxEventRepository.findPendingEventsForProcessing(50))
                 .thenReturn(Collections.emptyList());
 
@@ -117,9 +119,10 @@ class OutboxEventPublisherTest {
     }
 
     @Test
-    @DisplayName("should increment retry count and keep PENDING status on Kafka send failure")
+    @DisplayName(
+            "should increment retry count when Kafka publish fails and max retries not reached")
     @SuppressWarnings("unchecked")
-    void shouldHandleKafkaSendFailureAndIncrementRetryCount() {
+    void shouldIncrementRetryCountOnKafkaFailure() {
         OutboxEventEntity event =
                 OutboxEventEntity.builder()
                         .id(UUID.randomUUID())
@@ -135,21 +138,22 @@ class OutboxEventPublisherTest {
         when(outboxEventRepository.findPendingEventsForProcessing(50)).thenReturn(List.of(event));
 
         CompletableFuture<SendResult<String, String>> failedFuture = new CompletableFuture<>();
-        failedFuture.completeExceptionally(new RuntimeException("Kafka broker unreachable"));
+        failedFuture.completeExceptionally(new RuntimeException("Kafka broker unavailable"));
         when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(failedFuture);
 
         publisher.publishPendingEvents();
 
         assertThat(event.getStatus()).isEqualTo(OutboxEventStatus.PENDING);
         assertThat(event.getRetryCount()).isEqualTo(2);
-        assertThat(event.getErrorMessage()).contains("Kafka broker unreachable");
+        assertThat(event.getErrorMessage())
+                .isEqualTo("java.lang.RuntimeException: Kafka broker unavailable");
         assertThat(event.getProcessedAt()).isNull();
     }
 
     @Test
-    @DisplayName("should transition event to FAILED when max retries is exceeded")
+    @DisplayName("should mark event as FAILED when max retries threshold is reached")
     @SuppressWarnings("unchecked")
-    void shouldMarkEventAsFailedWhenMaxRetriesExceeded() {
+    void shouldMarkFailedWhenMaxRetriesReached() {
         OutboxEventEntity event =
                 OutboxEventEntity.builder()
                         .id(UUID.randomUUID())
@@ -165,18 +169,19 @@ class OutboxEventPublisherTest {
         when(outboxEventRepository.findPendingEventsForProcessing(50)).thenReturn(List.of(event));
 
         CompletableFuture<SendResult<String, String>> failedFuture = new CompletableFuture<>();
-        failedFuture.completeExceptionally(new RuntimeException("Persistent broker error"));
+        failedFuture.completeExceptionally(new RuntimeException("Persistent broker failure"));
         when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(failedFuture);
 
         publisher.publishPendingEvents();
 
         assertThat(event.getStatus()).isEqualTo(OutboxEventStatus.FAILED);
         assertThat(event.getRetryCount()).isEqualTo(5);
-        assertThat(event.getErrorMessage()).contains("Persistent broker error");
+        assertThat(event.getErrorMessage())
+                .isEqualTo("java.lang.RuntimeException: Persistent broker failure");
     }
 
     @Test
-    @DisplayName("should handle TimeoutException and increment retry count")
+    @DisplayName("should handle TimeoutException")
     @SuppressWarnings("unchecked")
     void shouldHandleTimeoutException() throws Exception {
         OutboxEventEntity event =
@@ -234,5 +239,70 @@ class OutboxEventPublisherTest {
         assertThat(Thread.interrupted()).isTrue();
         assertThat(event.getStatus()).isEqualTo(OutboxEventStatus.PENDING);
         assertThat(event.getRetryCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("should publish immediately when onOutboxEventReady receives a pending event")
+    @SuppressWarnings("unchecked")
+    void shouldPublishImmediatelyOnOutboxEventReady() {
+        UUID eventId = UUID.randomUUID();
+        UUID tenantId = UUID.randomUUID();
+        UUID ticketId = UUID.randomUUID();
+        OutboxEventEntity event =
+                OutboxEventEntity.builder()
+                        .id(eventId)
+                        .tenantId(tenantId)
+                        .aggregateType("Ticket")
+                        .aggregateId(ticketId)
+                        .eventType("TicketCreatedEvent")
+                        .payload("{\"ticketId\":\"" + ticketId + "\"}")
+                        .status(OutboxEventStatus.PENDING)
+                        .build();
+
+        when(outboxEventRepository.findById(eventId)).thenReturn(Optional.of(event));
+
+        SendResult<String, String> sendResult = mock(SendResult.class);
+        when(kafkaTemplate.send(any(ProducerRecord.class)))
+                .thenReturn(CompletableFuture.completedFuture(sendResult));
+
+        publisher.onOutboxEventReady(new OutboxEventReadyEvent(eventId));
+
+        verify(kafkaTemplate).send(any(ProducerRecord.class));
+        assertThat(event.getStatus()).isEqualTo(OutboxEventStatus.PUBLISHED);
+        assertThat(event.getProcessedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName(
+            "should skip publishing when onOutboxEventReady receives an already published event")
+    void shouldSkipWhenOutboxEventAlreadyPublished() {
+        UUID eventId = UUID.randomUUID();
+        OutboxEventEntity event =
+                OutboxEventEntity.builder()
+                        .id(eventId)
+                        .tenantId(UUID.randomUUID())
+                        .aggregateType("Ticket")
+                        .aggregateId(UUID.randomUUID())
+                        .eventType("TicketCreatedEvent")
+                        .payload("{}")
+                        .status(OutboxEventStatus.PUBLISHED)
+                        .build();
+
+        when(outboxEventRepository.findById(eventId)).thenReturn(Optional.of(event));
+
+        publisher.onOutboxEventReady(new OutboxEventReadyEvent(eventId));
+
+        verify(kafkaTemplate, never()).send(any(ProducerRecord.class));
+    }
+
+    @Test
+    @DisplayName("should skip publishing when onOutboxEventReady does not find the event")
+    void shouldSkipWhenOutboxEventNotFound() {
+        UUID eventId = UUID.randomUUID();
+        when(outboxEventRepository.findById(eventId)).thenReturn(Optional.empty());
+
+        publisher.onOutboxEventReady(new OutboxEventReadyEvent(eventId));
+
+        verify(kafkaTemplate, never()).send(any(ProducerRecord.class));
     }
 }

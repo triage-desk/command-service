@@ -1,5 +1,6 @@
 package dev.eyad_sharkawy.triage_desk.command_service.infrastructure.outbox;
 
+import dev.eyad_sharkawy.triage_desk.command_service.application.event.OutboxEventReadyEvent;
 import dev.eyad_sharkawy.triage_desk.command_service.domain.entity.OutboxEventEntity;
 import dev.eyad_sharkawy.triage_desk.command_service.domain.enums.OutboxEventStatus;
 import dev.eyad_sharkawy.triage_desk.command_service.infrastructure.config.OutboxProperties;
@@ -19,7 +20,10 @@ import org.jspecify.annotations.NullMarked;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 @Slf4j
 @Component
@@ -33,7 +37,21 @@ public class OutboxEventPublisher {
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final OutboxProperties outboxProperties;
 
-    @Scheduled(fixedDelayString = "${app.outbox.polling-delay-ms:500}")
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void onOutboxEventReady(OutboxEventReadyEvent event) {
+        log.debug("Handling immediate outbox dispatch for event {}", event.outboxEventId());
+        outboxEventRepository
+                .findById(event.outboxEventId())
+                .ifPresent(
+                        outboxEvent -> {
+                            if (outboxEvent.getStatus() == OutboxEventStatus.PENDING) {
+                                publishSingleEvent(outboxEvent);
+                            }
+                        });
+    }
+
+    @Scheduled(fixedDelayString = "${app.outbox.polling-delay-ms:30000}")
     @Transactional
     public void publishPendingEvents() {
         List<OutboxEventEntity> pendingEvents =

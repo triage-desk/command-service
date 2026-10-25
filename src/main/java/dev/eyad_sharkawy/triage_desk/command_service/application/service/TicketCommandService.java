@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.eyad_sharkawy.triage_desk.command_service.application.dto.CreateTicketRequest;
 import dev.eyad_sharkawy.triage_desk.command_service.application.dto.TicketResponse;
+import dev.eyad_sharkawy.triage_desk.command_service.application.event.OutboxEventReadyEvent;
 import dev.eyad_sharkawy.triage_desk.command_service.domain.entity.OutboxEventEntity;
 import dev.eyad_sharkawy.triage_desk.command_service.domain.entity.TicketEntity;
 import dev.eyad_sharkawy.triage_desk.command_service.domain.entity.UserEntity;
@@ -25,6 +26,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +42,7 @@ public class TicketCommandService {
     private final UserRepository userRepository;
     private final SlaCalculatorService slaCalculatorService;
     private final ObjectMapper objectMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public TicketResponse createTicket(CreateTicketRequest request, Jwt jwt) {
@@ -98,12 +101,17 @@ public class TicketCommandService {
                         .retryCount(0)
                         .build();
 
-        outboxEventRepository.save(outboxEvent);
+        outboxEvent = outboxEventRepository.save(outboxEvent);
+        UUID outboxEventId =
+                Objects.requireNonNull(
+                        outboxEvent.getId(), "Saved outbox event ID must not be null");
+
+        eventPublisher.publishEvent(new OutboxEventReadyEvent(outboxEventId));
 
         log.info(
                 "Ticket {} created with outbox event {} for tenant {}",
                 ticketId,
-                outboxEvent.getId(),
+                outboxEventId,
                 tenantId);
 
         return TicketResponse.fromEntity(ticket);
