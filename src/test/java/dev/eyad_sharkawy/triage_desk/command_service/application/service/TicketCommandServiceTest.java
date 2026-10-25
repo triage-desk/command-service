@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.eyad_sharkawy.triage_desk.command_service.application.dto.CreateTicketRequest;
 import dev.eyad_sharkawy.triage_desk.command_service.application.dto.TicketResponse;
+import dev.eyad_sharkawy.triage_desk.command_service.application.event.OutboxEventReadyEvent;
 import dev.eyad_sharkawy.triage_desk.command_service.domain.entity.OutboxEventEntity;
 import dev.eyad_sharkawy.triage_desk.command_service.domain.entity.TicketEntity;
 import dev.eyad_sharkawy.triage_desk.command_service.domain.entity.UserEntity;
@@ -37,6 +38,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 @ExtendWith(MockitoExtension.class)
@@ -49,6 +51,8 @@ class TicketCommandServiceTest {
     @Mock private UserRepository userRepository;
 
     @Mock private SlaCalculatorService slaCalculatorService;
+
+    @Mock private ApplicationEventPublisher eventPublisher;
 
     @Mock private Jwt jwt;
 
@@ -72,7 +76,8 @@ class TicketCommandServiceTest {
                         outboxEventRepository,
                         userRepository,
                         slaCalculatorService,
-                        objectMapper);
+                        objectMapper,
+                        eventPublisher);
     }
 
     @AfterEach
@@ -111,6 +116,15 @@ class TicketCommandServiceTest {
                             return entity;
                         });
 
+        UUID outboxId = UUID.randomUUID();
+        when(outboxEventRepository.save(any(OutboxEventEntity.class)))
+                .thenAnswer(
+                        invocation -> {
+                            OutboxEventEntity entity = invocation.getArgument(0);
+                            entity.setId(outboxId);
+                            return entity;
+                        });
+
         CreateTicketRequest request =
                 new CreateTicketRequest("Login Issue", "Cannot sign in", TicketPriority.HIGH, null);
 
@@ -138,6 +152,8 @@ class TicketCommandServiceTest {
         assertThat(savedOutbox.getAggregateId()).isEqualTo(ticketId);
         assertThat(savedOutbox.getEventType()).isEqualTo("TicketCreated");
         assertThat(savedOutbox.getStatus()).isEqualTo(OutboxEventStatus.PENDING);
+
+        verify(eventPublisher).publishEvent(any(OutboxEventReadyEvent.class));
 
         TicketCreatedEvent eventPayload =
                 objectMapper.readValue(savedOutbox.getPayload(), TicketCreatedEvent.class);
@@ -179,6 +195,14 @@ class TicketCommandServiceTest {
                             return entity;
                         });
 
+        when(outboxEventRepository.save(any(OutboxEventEntity.class)))
+                .thenAnswer(
+                        invocation -> {
+                            OutboxEventEntity entity = invocation.getArgument(0);
+                            entity.setId(UUID.randomUUID());
+                            return entity;
+                        });
+
         CreateTicketRequest request =
                 new CreateTicketRequest("General inquiry", "How does pricing work?", null, null);
 
@@ -186,6 +210,7 @@ class TicketCommandServiceTest {
 
         assertThat(response.customerEmail()).isEqualTo("newuser@example.com");
         verify(userRepository).save(any(UserEntity.class));
+        verify(eventPublisher).publishEvent(any(OutboxEventReadyEvent.class));
     }
 
     @Test
