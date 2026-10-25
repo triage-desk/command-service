@@ -13,6 +13,7 @@ import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NullMarked;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -25,6 +26,7 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
 public class IdempotencyFilter extends OncePerRequestFilter {
 
     public static final String IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
+    public static final String MDC_IDEMPOTENCY_KEY = "idempotencyKey";
     private static final Set<String> MUTATING_METHODS = Set.of("POST", "PUT", "PATCH");
 
     private final IdempotencyService idempotencyService;
@@ -71,6 +73,7 @@ public class IdempotencyFilter extends OncePerRequestFilter {
         boolean isLocked = idempotencyService.acquireLock(tenantId, key);
 
         if (!isLocked) {
+            log.warn("Idempotency conflict for key '{}' in tenant '{}'", key, tenantId);
             exceptionResolver.resolveException(
                     request,
                     response,
@@ -82,6 +85,7 @@ public class IdempotencyFilter extends OncePerRequestFilter {
             return;
         }
 
+        MDC.put(MDC_IDEMPOTENCY_KEY, key);
         try {
             filterChain.doFilter(request, response);
             if (response.getStatus() >= 200 && response.getStatus() <= 300) {
@@ -92,6 +96,8 @@ public class IdempotencyFilter extends OncePerRequestFilter {
         } catch (Exception ex) {
             idempotencyService.releaseLock(tenantId, key);
             throw ex;
+        } finally {
+            MDC.remove(MDC_IDEMPOTENCY_KEY);
         }
     }
 }

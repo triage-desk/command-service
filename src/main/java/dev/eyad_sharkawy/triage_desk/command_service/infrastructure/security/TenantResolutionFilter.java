@@ -16,6 +16,7 @@ import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NullMarked;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -31,6 +32,7 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
 @RequiredArgsConstructor
 public class TenantResolutionFilter extends OncePerRequestFilter {
 
+    public static final String MDC_TENANT_SLUG_KEY = "tenantSlug";
     private static final Pattern TENANT_URI_PATTERN =
             Pattern.compile("^/api/v1/([a-zA-Z0-9_-]+)(/.*)?$");
 
@@ -94,12 +96,14 @@ public class TenantResolutionFilter extends OncePerRequestFilter {
             }
 
             log.debug("Successfully resolved tenant '{}' to ID {}", tenantSlug, tenantId);
+            MDC.put(MDC_TENANT_SLUG_KEY, tenantSlug);
             TenantContext.setTenantId(tenantId);
             filterChain.doFilter(request, response);
         } catch (Exception ex) {
             exceptionResolver.resolveException(request, response, null, ex);
         } finally {
             TenantContext.clear();
+            MDC.remove(MDC_TENANT_SLUG_KEY);
         }
     }
 }
